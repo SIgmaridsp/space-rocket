@@ -1,8 +1,78 @@
-import pygame
+import importlib
+import importlib.util
+import sys
 import os
 import random
 import math
-import sys
+
+# Safe import for pygame to avoid circular imports or local shadowing
+def safe_import_pygame():
+    try:
+        import pygame as _pygame
+        if hasattr(_pygame, 'init'):
+            return _pygame
+    except Exception:
+        # swallow; we'll try to find a real installation below
+        pass
+
+    # Gather any module file that was partially imported
+    bad_imports = []
+    try:
+        import pygame as _maybe
+        bad_imports.append(getattr(_maybe, '__file__', None))
+    except Exception:
+        pass
+
+    # Collect candidate pygame files on sys.path (package dir or single-file)
+    candidates = []
+    for p in sys.path:
+        init_path = os.path.join(p, 'pygame', '__init__.py')
+        single_path = os.path.join(p, 'pygame.py')
+        if os.path.isfile(init_path):
+            candidates.append(init_path)
+        if os.path.isfile(single_path):
+            candidates.append(single_path)
+
+    # Prefer candidates in site-packages or dist-packages
+    site_candidates = [c for c in candidates if ('site-packages' in c) or ('dist-packages' in c)]
+    ordered = site_candidates + [c for c in candidates if c not in site_candidates]
+
+    for path in ordered:
+        try:
+            if 'pygame' in sys.modules:
+                del sys.modules['pygame']
+            spec = importlib.util.spec_from_file_location('pygame', path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['pygame'] = module
+            spec.loader.exec_module(module)
+            if hasattr(module, 'init'):
+                return module
+        except Exception:
+            continue
+
+    # Build a helpful diagnostic message for the user
+    info_lines = []
+    for b in bad_imports:
+        if b:
+            info_lines.append(f"Previously imported pygame from: {b}")
+    for c in ordered:
+        info_lines.append(f"Candidate file: {c}")
+
+    paths = "\n".join(sys.path)
+    msg = (
+        "Could not import a functional 'pygame' package. "
+        "Check for a local file named 'pygame.py' or a folder named 'pygame' that shadows the real package.\n\n"
+        "Diagnostics:\n" + ("\n".join(info_lines) + "\n\n" if info_lines else "")
+        + "sys.path:\n" + paths
+    )
+    # Print diagnostics to console to help debugging before raising
+    try:
+        print(msg, flush=True)
+    except Exception:
+        pass
+    raise ImportError(msg)
+
+pygame = safe_import_pygame()
 
 # --------------------------------------------------------------
 # INITIAL SETUP
